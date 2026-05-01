@@ -24,8 +24,6 @@ import {
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
-const OPENROUTER_API_KEY = import.meta.env.VITE_OPENROUTER_KEY;
-
 type ChatMessage = {
   role: 'user' | 'ai';
   text: string;
@@ -179,10 +177,6 @@ const alignStopsToDayLocations = async (trip: GeneratedTrip) => {
 };
 
 const callOpenRouter = async (chatHistory: ChatMessage[], systemPrompt?: string) => {
-  if (!OPENROUTER_API_KEY) {
-    throw new Error("OPENROUTER_API_KEY is not set");
-  }
-
   const messages = [
     ...(systemPrompt ? [{ role: 'system', content: systemPrompt }] : []),
     ...chatHistory.map(m => ({
@@ -191,41 +185,30 @@ const callOpenRouter = async (chatHistory: ChatMessage[], systemPrompt?: string)
     })),
   ];
 
-  const lastError: string[] = [];
+  try {
+    const response = await fetch('/api/openrouter', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ messages, models: MODELS }),
+    });
 
-  for (const model of MODELS) {
-    try {
-      const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${OPENROUTER_API_KEY}`,
-          "Content-Type": "application/json",
-          "HTTP-Referer": window.location.origin,
-          "X-Title": "AI Trip Planner"
-        },
-        body: JSON.stringify({ model, messages })
-      });
+    const data = await response.json();
 
-      const data = await response.json();
-
-      if (!response.ok) {
-        const msg = data.error?.message ?? `HTTP ${response.status}`;
-        console.warn(`⚠️ Model ${model} failed:`, msg);
-        lastError.push(`${model}: ${msg}`);
-        continue;
-      }
-
-      console.log(`✅ Used model: ${model}`);
-      return data.choices[0].message.content as string;
-
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.warn(`⚠️ Model ${model} network error:`, err);
-      lastError.push(`${model}: ${msg}`);
+    if (!response.ok) {
+      throw new Error(data.error ?? `HTTP ${response.status}`);
     }
-  }
 
-  throw new Error(`All models failed:\n${lastError.join('\n')}`);
+    if (data.model) {
+      console.log(`Used model: ${data.model}`);
+    }
+
+    return data.content as string;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new Error(`AI request failed: ${msg}`);
+  }
 };
 
 async function extractTextFromPDF(file: File): Promise<string> {
