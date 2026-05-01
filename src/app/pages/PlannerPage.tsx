@@ -14,7 +14,7 @@ import { BG, BLUE, GREEN, GOLD, TEXT_DARK, TEXT_MID, TEXT_LIGHT, neuEx, neuIn, n
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js`;
 
-const OPENROUTER_API_KEY = "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";
+const OPENROUTER_API_KEY = import.meta.env.VITE_OPENROUTER_KEY as string;
 
 type TripStop = {
   city: string;
@@ -40,6 +40,10 @@ const MODELS = [
 ];
 
 const callOpenRouter = async (chatHistory: ChatMessage[], systemPrompt?: string) => {
+  if (!OPENROUTER_API_KEY) {
+    throw new Error("VITE_OPENROUTER_KEY is not set in your .env file");
+  }
+
   const messages = [
     ...(systemPrompt ? [{ role: 'system', content: systemPrompt }] : []),
     ...chatHistory.map(m => ({
@@ -47,6 +51,8 @@ const callOpenRouter = async (chatHistory: ChatMessage[], systemPrompt?: string)
       content: m.text,
     })),
   ];
+
+  const lastError: string[] = [];
 
   for (const model of MODELS) {
     try {
@@ -62,22 +68,25 @@ const callOpenRouter = async (chatHistory: ChatMessage[], systemPrompt?: string)
       });
 
       const data = await response.json();
-      
+
       if (!response.ok) {
-        console.warn(`⚠️ Model ${model} failed:`, data.error?.message);
-        continue; // ลองโมเดลถัดไป
+        const msg = data.error?.message ?? `HTTP ${response.status}`;
+        console.warn(`⚠️ Model ${model} failed:`, msg, data);
+        lastError.push(`${model}: ${msg}`);
+        continue;
       }
 
       console.log(`✅ Used model: ${model}`);
-      return data.choices[0].message.content;
+      return data.choices[0].message.content as string;
 
     } catch (err) {
-      console.warn(`⚠️ Model ${model} error:`, err);
-      continue;
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`⚠️ Model ${model} network error:`, err);
+      lastError.push(`${model}: ${msg}`);
     }
   }
 
-  throw new Error("ไม่มีโมเดลที่ใช้งานได้ในขณะนี้ กรุณาลองใหม่อีกครั้ง");
+  throw new Error(`All models failed:\n${lastError.join('\n')}`);
 };
 
 // ✅ อ่าน PDF เป็น text

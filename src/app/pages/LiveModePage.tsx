@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router';
 import { motion, AnimatePresence } from 'motion/react';
 import {
@@ -24,7 +24,9 @@ export default function LiveModePage() {
   const [questAccepted, setQuestAccepted] = useState(false);
   const [feedback, setFeedback] = useState(0);
   const [listening, setListening] = useState(false);
-  const [eta, setEta] = useState('23 min');
+  const [uploadedPhoto, setUploadedPhoto] = useState<string | null>(null);
+  const photoInputRef = useRef<HTMLInputElement>(null);
+  const eta = '23 min';
 
   useEffect(() => {
     const t1 = setTimeout(() => setShowFeedback(true), 3000);
@@ -285,11 +287,31 @@ export default function LiveModePage() {
             </div>
 
             {/* Photo Upload Box */}
-            <div className="rounded-2xl flex flex-col items-center justify-center py-5 mb-4"
-              style={{ background: BG, boxShadow: neuIn, border: `1.5px dashed ${GOLD}66` }}>
-              <Camera size={22} color={GOLD} />
-              <div style={{ fontSize: 12, color: TEXT_MID, marginTop: 6 }}>Tap to upload proof photo</div>
-            </div>
+            <input
+              ref={photoInputRef}
+              type="file"
+              accept="image/*"
+              style={{ display: 'none' }}
+              onChange={e => {
+                const file = e.target.files?.[0];
+                if (file) setUploadedPhoto(URL.createObjectURL(file));
+              }}
+            />
+            <motion.button
+              whileTap={{ scale: 0.97 }}
+              onClick={() => photoInputRef.current?.click()}
+              className="w-full rounded-2xl flex flex-col items-center justify-center mb-4 overflow-hidden"
+              style={{ background: BG, boxShadow: neuIn, border: `1.5px dashed ${GOLD}66`, cursor: 'pointer', minHeight: 88 }}
+            >
+              {uploadedPhoto ? (
+                <img src={uploadedPhoto} alt="proof" style={{ width: '100%', height: 88, objectFit: 'cover' }} />
+              ) : (
+                <>
+                  <Camera size={22} color={GOLD} />
+                  <div style={{ fontSize: 12, color: TEXT_MID, marginTop: 6 }}>Tap to upload proof photo</div>
+                </>
+              )}
+            </motion.button>
 
             {/* Accept Button */}
             <motion.button
@@ -336,13 +358,14 @@ export default function LiveModePage() {
             <div style={{ fontSize: 13, color: TEXT_MID, textAlign: 'center', marginBottom: 16 }}>
               +500 EXP added to your account. Head to Baan Nang Craft and complete the quest!
             </div>
-            <button
-              onClick={() => setShowQuest(false)}
+            <motion.button
+              whileTap={{ scale: 0.95 }}
+              onClick={() => { setQuestAccepted(false); setShowQuest(false); setUploadedPhoto(null); }}
               className="px-6 py-3 rounded-2xl"
               style={{ background: GOLD, color: '#fff', border: 'none', cursor: 'pointer', fontWeight: 600, boxShadow: neuEx, fontFamily: 'Poppins, sans-serif' }}
             >
               Let's Go! 🚀
-            </button>
+            </motion.button>
           </motion.div>
         )}
       </AnimatePresence>
