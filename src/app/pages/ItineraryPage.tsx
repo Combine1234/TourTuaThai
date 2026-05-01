@@ -101,8 +101,9 @@ export default function ItineraryPage() {
   return (
     <div className="flex flex-col h-full" style={{ background: BG, fontFamily: 'Poppins, sans-serif' }}>
       {/* Header */}
-      <div className="flex-shrink-0 px-5 pt-10 pb-4">
-        <div className="flex items-center justify-between mb-4">
+      <div className="flex-shrink-0 pt-10 px-4 pb-3">
+        <div className="px-4 py-4 rounded-3xl" style={{ background: BG, boxShadow: neuExSm }}>
+        <div className="flex items-center justify-between mb-3">
           <button
             onClick={() => navigate('/planner')}
             className="flex items-center gap-1.5"
@@ -122,7 +123,7 @@ export default function ItineraryPage() {
 
         {/* Total Budget Card */}
         <motion.div
-          className="rounded-3xl px-5 py-4 mb-2"
+          className="rounded-3xl px-5 py-4 mt-1"
           style={{ background: BG, boxShadow: neuGoldGlow }}
         >
           <div className="flex items-start justify-between">
@@ -159,10 +160,11 @@ export default function ItineraryPage() {
             </div>
           </div>
         </motion.div>
+        </div>
       </div>
 
       {/* Day Cards */}
-      <div className="flex-1 overflow-y-auto px-5 pb-8" style={{ scrollbarWidth: 'none' }}>
+      <div className="flex-1 overflow-y-auto px-6 pt-6 pb-8" style={{ scrollbarWidth: 'none' }}>
         {days.map((day) => (
           <div key={day.day} className="mb-4">
             {/* Day Header */}

@@ -91,7 +91,8 @@ export default function PersonalityPage() {
   return (
     <div className="flex flex-col h-full" style={{ background: BG, fontFamily: 'Poppins, sans-serif' }}>
       {/* Header */}
-      <div className="flex-shrink-0 px-6 pt-10 pb-4">
+      <div className="flex-shrink-0 pt-10 px-4 pb-3">
+        <div className="px-5 py-4 rounded-3xl" style={{ background: BG, boxShadow: neuExSm }}>
         <div className="flex items-center gap-3 mb-4">
           <div className="w-9 h-9 rounded-full flex items-center justify-center" style={{ background: BLUE, boxShadow: neuExSm }}>
             <User size={16} color="#fff" />
@@ -119,10 +120,11 @@ export default function PersonalityPage() {
           Tell us your<br />travel style ✈️
         </h1>
         <p style={{ color: TEXT_MID, fontSize: 13, marginTop: 6 }}>Slide to match your vibe. We'll craft the perfect trip.</p>
+        </div>
       </div>
 
       {/* Sliders */}
-      <div className="flex-1 overflow-y-auto px-6 pb-4" style={{ scrollbarWidth: 'none' }}>
+      <div className="flex-1 overflow-y-auto px-6 pt-6 pb-6" style={{ scrollbarWidth: 'none' }}>
         {sliders.map((slider) => (
           <motion.div
             key={slider.id}

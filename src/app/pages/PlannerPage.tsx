@@ -14,6 +14,7 @@ const OPENROUTER_API_KEY = 'sk-or-v1-9b86bc3e438395464f0fb7818a7a647fe7df3a6d1a6
 type ChatMessage = {
   role: 'user' | 'ai';
   text: string;
+  file?: { name: string; size: string };
 };
 
 const callOpenRouter = async (chatHistory: ChatMessage[]) => {
@@ -174,7 +175,7 @@ export default function PlannerPage() {
   const navigate = useNavigate();
   const [activeFilter, setActiveFilter] = useState<string | null>(null);
   const [showAI, setShowAI] = useState(false);
-  const [messages, setMessages] = useState<Message[]>(AI_MESSAGES);
+  const [messages, setMessages] = useState<ChatMessage[]>(AI_MESSAGES);
   const [input, setInput] = useState('');
   const [attachedFile, setAttachedFile] = useState<{ name: string; size: string } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -211,29 +212,33 @@ export default function PlannerPage() {
   };
 
   const sendMessage = async () => {
-    if (!input.trim()) return;
+    if (!input.trim() && !attachedFile) return;
 
-    const userMsg: ChatMessage = { role: 'user', text: input };
-    const updatedMessages: ChatMessage[] = [...messages, userMsg];
-    
-    setMessages(updatedMessages);
+    const userMsg: ChatMessage = {
+      role: 'user',
+      text: input,
+      ...(attachedFile ? { file: attachedFile } : {}),
+    };
+    const fileLabel = attachedFile ? `[Attached file: ${attachedFile.name}]\n` : '';
+
+    setMessages(prev => [...prev, userMsg]);
     setInput('');
+    setAttachedFile(null);
+
+    // Build API history — inject file label into the text sent to the model
+    const apiHistory: ChatMessage[] = [
+      ...messages,
+      { role: 'user', text: fileLabel + input },
+    ];
 
     try {
-      const aiResponseText = await callOpenRouter(updatedMessages);
-      
-      const aiMsg: ChatMessage = { 
-        role: 'ai', 
-        text: aiResponseText 
-      };
-      setMessages(prev => [...prev, aiMsg]);
-    } catch (error: any) { // เติม : any หรือ : Error เข้าไปถ้าใช้ TypeScript
+      const aiResponseText = await callOpenRouter(apiHistory);
+      setMessages(prev => [...prev, { role: 'ai', text: aiResponseText }]);
+    } catch (error: any) {
       console.error("AI Error:", error);
-      
-      // 💡 เปลี่ยนจากข้อความ 😵‍💫 เป็นการดึง error.message ออกมาโชว์เลย
-      setMessages(prev => [...prev, { 
-        role: 'ai', 
-        text: `🚨 ล้มเหลว: ${error.message || "ไม่ทราบสาเหตุ ลองเช็ค Console (F12)"}` 
+      setMessages(prev => [...prev, {
+        role: 'ai',
+        text: `🚨 ล้มเหลว: ${error.message || "ไม่ทราบสาเหตุ ลองเช็ค Console (F12)"}`,
       }]);
     }
   };
