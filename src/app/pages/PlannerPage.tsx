@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -119,12 +119,13 @@ const LAYER_OPTIONS = [
 ];
 
 // ─────────────────────────────────────────────
-// TripMap — init map once, redraw overlays on stops change
+// TripMap — fixed race condition between map init and stops update
 // ─────────────────────────────────────────────
 const TripMap = ({ stops }: { stops: TripStop[] }) => {
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<any>(null);
   const mapReadyRef = useRef(false);
+  const pendingStopsRef = useRef<TripStop[]>(stops); // always holds latest stops
   const [showLayerMenu, setShowLayerMenu] = useState(false);
   const [activeLayer, setActiveLayer] = useState<'map' | 'satellite' | 'traffic'>('map');
 
@@ -145,6 +146,96 @@ const TripMap = ({ stops }: { stops: TripStop[] }) => {
     setActiveLayer(layer);
     setShowLayerMenu(false);
   };
+
+  // ── Shared redraw function (stable ref via useCallback) ──
+  const redrawOverlays = useCallback((currentStops: TripStop[], map: any) => {
+    const longdo = (window as any).longdo;
+    if (!map || !longdo) return;
+
+    try { map.Overlays.clear(); } catch {}
+    if (currentStops.length === 0) return;
+
+    // Place markers
+    currentStops.forEach(stop => {
+      const marker = new longdo.Marker(
+        { lon: stop.lon, lat: stop.lat },
+        {
+          title: stop.city,
+          detail: `Day ${stop.day}${stop.note ? ': ' + stop.note : ''}`,
+          icon: {
+            html: `<div style="
+              background:${stop.color};color:white;border-radius:50%;
+              width:34px;height:34px;display:flex;align-items:center;
+              justify-content:center;font-weight:700;
+              border:2.5px solid white;box-shadow:0 2px 8px rgba(0,0,0,0.25);
+              font-family:Poppins,sans-serif;flex-direction:column;line-height:1.1;
+            ">
+              <span style="font-size:8px;opacity:0.85">D${stop.day}</span>
+              <span style="font-size:7px;max-width:28px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${stop.city.split(' ')[0]}</span>
+            </div>`,
+            offset: { x: 17, y: 17 },
+          },
+        }
+      );
+      map.Overlays.add(marker);
+    });
+
+    // Center map to fit all stops
+    const lats = currentStops.map(s => s.lat);
+    const lons = currentStops.map(s => s.lon);
+    map.location({
+      lon: (Math.min(...lons) + Math.max(...lons)) / 2,
+      lat: (Math.min(...lats) + Math.max(...lats)) / 2,
+    }, true);
+
+    // Draw real road routes via OSRM, fallback to straight line
+    const sorted = [...currentStops].sort((a, b) => a.day - b.day);
+
+    const drawRoutes = async () => {
+      for (let i = 1; i < sorted.length; i++) {
+        const prev = sorted[i - 1];
+        const curr = sorted[i];
+
+        try {
+          const res = await fetch(
+            `https://router.project-osrm.org/route/v1/driving/${prev.lon},${prev.lat};${curr.lon},${curr.lat}?overview=full&geometries=geojson`
+          );
+          const data = await res.json();
+
+          if (data.code !== 'Ok' || !data.routes?.[0]) throw new Error('No route');
+
+          const coords: { lon: number; lat: number }[] = data.routes[0].geometry.coordinates.map(
+            ([lon, lat]: [number, number]) => ({ lon, lat })
+          );
+
+          // Shadow line for depth
+          map.Overlays.add(new longdo.Polyline(coords, {
+            lineColor: '#00000022',
+            lineWidth: 7,
+            lineStyle: longdo.LineStyle.Solid,
+            opacity: 1,
+          }));
+
+          // Colored route line on top
+          map.Overlays.add(new longdo.Polyline(coords, {
+            lineColor: curr.color,
+            lineWidth: 4,
+            lineStyle: longdo.LineStyle.Solid,
+            opacity: 0.9,
+          }));
+
+        } catch {
+          // Fallback: dashed straight line
+          map.Overlays.add(new longdo.Polyline(
+            [{ lon: prev.lon, lat: prev.lat }, { lon: curr.lon, lat: curr.lat }],
+            { lineColor: curr.color, lineWidth: 3, lineStyle: longdo.LineStyle.Dash, opacity: 0.8 }
+          ));
+        }
+      }
+    };
+
+    drawRoutes();
+  }, []); // no deps — only uses args and window globals
 
   // ── Init map ONCE ──────────────────────────
   useEffect(() => {
@@ -173,6 +264,11 @@ const TripMap = ({ stops }: { stops: TripStop[] }) => {
           s.textContent = `.ldmap_copyright,.ldmap-copyright,.ldmap_info,.longdo-copyright{font-size:9px!important;opacity:0.6;white-space:nowrap!important;overflow:hidden!important;text-overflow:ellipsis!important;max-width:200px!important}`;
           mapRef.current.appendChild(s);
         }
+
+        // ✅ After map is ready, draw any stops that arrived before init finished
+        if (pendingStopsRef.current.length > 0) {
+          redrawOverlays(pendingStopsRef.current, map);
+        }
       } catch (err) {
         console.error('Longdo Map init error:', err);
       }
@@ -185,101 +281,18 @@ const TripMap = ({ stops }: { stops: TripStop[] }) => {
       script?.addEventListener('load', initMap);
       return () => script?.removeEventListener('load', initMap);
     }
-  }, []); // init only once
+  }, [redrawOverlays]); // stable dep
 
   // ── Redraw overlays whenever stops change ──
   useEffect(() => {
-    const map = mapInstanceRef.current;
-    if (!map || !(window as any).longdo) return;
-    const longdo = (window as any).longdo;
+    // Always keep pendingStopsRef up to date
+    pendingStopsRef.current = stops;
 
-    // Clear previous markers & routes
-    try { map.Overlays.clear(); } catch {}
+    // If map isn't ready yet, initMap will pick up pendingStopsRef when it fires
+    if (!mapReadyRef.current || !mapInstanceRef.current) return;
 
-    if (stops.length === 0) return;
-
-    // Place markers
-    stops.forEach(stop => {
-      const marker = new longdo.Marker(
-        { lon: stop.lon, lat: stop.lat },
-        {
-          title: stop.city,
-          detail: `Day ${stop.day}${stop.note ? ': ' + stop.note : ''}`,
-          icon: {
-            html: `<div style="
-              background:${stop.color};color:white;border-radius:50%;
-              width:34px;height:34px;display:flex;align-items:center;
-              justify-content:center;font-weight:700;
-              border:2.5px solid white;box-shadow:0 2px 8px rgba(0,0,0,0.25);
-              font-family:Poppins,sans-serif;flex-direction:column;line-height:1.1;
-            ">
-              <span style="font-size:8px;opacity:0.85">D${stop.day}</span>
-              <span style="font-size:7px;max-width:28px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${stop.city.split(' ')[0]}</span>
-            </div>`,
-            offset: { x: 17, y: 17 },
-          },
-        }
-      );
-      map.Overlays.add(marker);
-    });
-
-    // Center map to fit all stops
-    const lats = stops.map(s => s.lat);
-    const lons = stops.map(s => s.lon);
-    map.location({
-      lon: (Math.min(...lons) + Math.max(...lons)) / 2,
-      lat: (Math.min(...lats) + Math.max(...lats)) / 2,
-    }, true);
-
-    // Draw real road routes via OSRM, fallback to straight line
-    const sorted = [...stops].sort((a, b) => a.day - b.day);
-
-    const drawRoutes = async () => {
-      for (let i = 1; i < sorted.length; i++) {
-        const prev = sorted[i - 1];
-        const curr = sorted[i];
-
-        try {
-          const res = await fetch(
-            `https://router.project-osrm.org/route/v1/driving/${prev.lon},${prev.lat};${curr.lon},${curr.lat}?overview=full&geometries=geojson`
-          );
-          const data = await res.json();
-
-          if (data.code !== 'Ok' || !data.routes?.[0]) throw new Error('No route');
-
-          // OSRM returns [lon, lat] pairs
-          const coords: { lon: number; lat: number }[] = data.routes[0].geometry.coordinates.map(
-            ([lon, lat]: [number, number]) => ({ lon, lat })
-          );
-
-          // Draw thick shadow line for depth (Google Maps style)
-          map.Overlays.add(new longdo.Polyline(coords, {
-            lineColor: '#00000022',
-            lineWidth: 7,
-            lineStyle: longdo.LineStyle.Solid,
-            opacity: 1,
-          }));
-
-          // Draw colored route line on top
-          map.Overlays.add(new longdo.Polyline(coords, {
-            lineColor: curr.color,
-            lineWidth: 4,
-            lineStyle: longdo.LineStyle.Solid,
-            opacity: 0.9,
-          }));
-
-        } catch {
-          // Fallback: dashed straight line
-          map.Overlays.add(new longdo.Polyline(
-            [{ lon: prev.lon, lat: prev.lat }, { lon: curr.lon, lat: curr.lat }],
-            { lineColor: curr.color, lineWidth: 3, lineStyle: longdo.LineStyle.Dash, opacity: 0.8 }
-          ));
-        }
-      }
-    };
-
-    drawRoutes();
-  }, [stops]); // re-run only when stops change
+    redrawOverlays(stops, mapInstanceRef.current);
+  }, [stops, redrawOverlays]);
 
   const activeLyr = LAYER_OPTIONS.find(l => l.id === activeLayer)!;
 
