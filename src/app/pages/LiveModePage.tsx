@@ -211,7 +211,7 @@ export default function LiveModePage() {
           )}
         </motion.button>
 
-        {/* Next Stop */}
+        {/* Share Route — Strava style */}
         <motion.button
           whileTap={{ scale: 0.93 }}
           initial={{ opacity: 0, x: 20 }}
@@ -219,15 +219,23 @@ export default function LiveModePage() {
           transition={{ delay: 0.7 }}
           className="flex flex-col items-center gap-2"
           style={{ background: 'none', border: 'none', cursor: 'pointer' }}
+          onClick={() => {
+            const text = `🗺️ TourTuaThai Live Route — Day 1\n📍 Grand Palace ✅\n📍 Wat Pho ✅\n📍 Chatuchak Market 🟢\n📍 Asiatique Market ⏳\n🔥 1,250 EXP · Lvl 7 Explorer\nJoin me!`;
+            if (navigator.share) {
+              navigator.share({ title: 'My TourTuaThai Route', text });
+            } else {
+              navigator.clipboard.writeText(text).then(() => alert('Route copied!'));
+            }
+          }}
         >
           <div className="px-3 py-2.5 rounded-xl flex items-center gap-1.5"
-            style={{ background: 'rgba(39,174,96,0.9)', backdropFilter: 'blur(8px)', boxShadow: neuExSm }}>
-            <span style={{ fontSize: 12, fontWeight: 700, color: '#fff' }}>Next Stop</span>
+            style={{ background: 'rgba(27,115,198,0.9)', backdropFilter: 'blur(8px)', boxShadow: neuExSm }}>
+            <span style={{ fontSize: 12, fontWeight: 700, color: '#fff' }}>Share Route</span>
             <ChevronRight size={14} color="#fff" />
           </div>
           <div className="px-3 py-1 rounded-full"
             style={{ background: 'rgba(232,237,242,0.85)', backdropFilter: 'blur(8px)' }}>
-            <span style={{ fontSize: 11, color: TEXT_DARK }}>Asiatique 🌃</span>
+            <span style={{ fontSize: 11, color: TEXT_DARK }}>🏃 Strava style</span>
           </div>
         </motion.button>
       </div>
@@ -290,7 +298,6 @@ export default function LiveModePage() {
               border: `2px solid ${GOLD}66`,
             }}
           >
-            {/* Quest Header */}
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-2">
                 <motion.div
@@ -316,7 +323,6 @@ export default function LiveModePage() {
               Find <strong style={{ color: TEXT_DARK }}>Baan Nang Craft</strong>, buy a souvenir, and upload a photo to earn XP.
             </div>
 
-            {/* Photo Upload Box */}
             <input
               ref={photoInputRef}
               type="file"
@@ -343,7 +349,6 @@ export default function LiveModePage() {
               )}
             </motion.button>
 
-            {/* Accept Button */}
             <motion.button
               whileTap={{ scale: 0.95 }}
               onClick={() => setQuestAccepted(true)}

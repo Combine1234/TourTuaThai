@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -155,7 +155,6 @@ const geocodeProvinceOrCity = async (query: string) => {
 const alignStopsToDayLocations = async (trip: GeneratedTrip) => {
   const alignedStops = await Promise.all(
     trip.stops.map(async stop => {
-      // ถ้ามี coordinates จริงอยู่แล้ว ไม่ต้อง geocode
       if (stop.lat !== 0 || stop.lon !== 0) return stop;
 
       const day = trip.days.find(item => item.day === stop.day);
@@ -175,7 +174,6 @@ const alignStopsToDayLocations = async (trip: GeneratedTrip) => {
 
   return {
     ...trip,
-    // กรองทิ้ง stops ที่ยังไม่มี coordinates จริง (lat=0, lon=0)
     stops: alignedStops.filter(s => s.lat !== 0 || s.lon !== 0),
   };
 };
@@ -259,13 +257,11 @@ const LAYER_OPTIONS = [
 ];
 
 // ─────────────────────────────────────────────
-// TripMap — fixed race condition between map init and stops update
+// TripMap — init map once, redraw overlays on stops change
 // ─────────────────────────────────────────────
 const TripMap = ({ stops }: { stops: TripStop[] }) => {
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<any>(null);
-  const mapReadyRef = useRef(false);
-  const pendingStopsRef = useRef<TripStop[]>(stops); // always holds latest stops
   const [showLayerMenu, setShowLayerMenu] = useState(false);
   const [activeLayer, setActiveLayer] = useState<'map' | 'satellite' | 'traffic'>('map');
 
@@ -287,7 +283,7 @@ const TripMap = ({ stops }: { stops: TripStop[] }) => {
     setShowLayerMenu(false);
   };
 
-  // ── Init map ONCE ──────────────────────────
+  // Init map ONCE
   useEffect(() => {
     if (!mapRef.current) return;
 
@@ -302,7 +298,6 @@ const TripMap = ({ stops }: { stops: TripStop[] }) => {
         });
         map.location({ lon: 100.5, lat: 14.5 }, true);
         mapInstanceRef.current = map;
-        mapReadyRef.current = true;
 
         try { map.Ui.DPad.visible(false); } catch {}
         try { map.Ui.Zoombar.visible(false); } catch {}
@@ -326,20 +321,19 @@ const TripMap = ({ stops }: { stops: TripStop[] }) => {
       script?.addEventListener('load', initMap);
       return () => script?.removeEventListener('load', initMap);
     }
-  }, []); // init only once
+  }, []);
 
-  // ── Redraw overlays whenever stops change ──
+  // Redraw overlays whenever stops change
   useEffect(() => {
     const map = mapInstanceRef.current;
     if (!map || !(window as any).longdo) return;
     const longdo = (window as any).longdo;
 
-    // Clear previous markers & routes
     try { map.Overlays.clear(); } catch {}
-    if (currentStops.length === 0) return;
 
-    // Place markers
-    currentStops.forEach(stop => {
+    if (stops.length === 0) return;
+
+    stops.forEach(stop => {
       const marker = new longdo.Marker(
         { lon: stop.lon, lat: stop.lat },
         {
@@ -363,15 +357,13 @@ const TripMap = ({ stops }: { stops: TripStop[] }) => {
       map.Overlays.add(marker);
     });
 
-    // Center map to fit all stops
-    const lats = currentStops.map(s => s.lat);
-    const lons = currentStops.map(s => s.lon);
+    const lats = stops.map(s => s.lat);
+    const lons = stops.map(s => s.lon);
     map.location({
       lon: (Math.min(...lons) + Math.max(...lons)) / 2,
       lat: (Math.min(...lats) + Math.max(...lats)) / 2,
     }, true);
 
-    // Draw real road routes via OSRM, fallback to straight line
     const sorted = [...stops].sort((a, b) => {
       const dayDiff = a.day - b.day;
       if (dayDiff !== 0) return dayDiff;
@@ -395,7 +387,6 @@ const TripMap = ({ stops }: { stops: TripStop[] }) => {
             ([lon, lat]: [number, number]) => ({ lon, lat })
           );
 
-          // Shadow line for depth
           map.Overlays.add(new longdo.Polyline(coords, {
             lineColor: '#00000022',
             lineWidth: 7,
@@ -403,7 +394,6 @@ const TripMap = ({ stops }: { stops: TripStop[] }) => {
             opacity: 1,
           }));
 
-          // Colored route line on top
           map.Overlays.add(new longdo.Polyline(coords, {
             lineColor: curr.color,
             lineWidth: 4,
@@ -412,7 +402,6 @@ const TripMap = ({ stops }: { stops: TripStop[] }) => {
           }));
 
         } catch {
-          // Fallback: dashed straight line
           map.Overlays.add(new longdo.Polyline(
             [{ lon: prev.lon, lat: prev.lat }, { lon: curr.lon, lat: curr.lat }],
             { lineColor: curr.color, lineWidth: 3, lineStyle: longdo.LineStyle.Dash, opacity: 0.8 }
@@ -422,64 +411,7 @@ const TripMap = ({ stops }: { stops: TripStop[] }) => {
     };
 
     drawRoutes();
-  }, []); // no deps — only uses args and window globals
-
-  // ── Init map ONCE ──────────────────────────
-  useEffect(() => {
-    if (!mapRef.current) return;
-
-    const initMap = () => {
-      if (!(window as any).longdo || mapInstanceRef.current) return;
-      try {
-        const longdo = (window as any).longdo;
-        const map = new longdo.Map({
-          placeholder: mapRef.current,
-          zoom: 6,
-          lastView: false,
-        });
-        map.location({ lon: 100.5, lat: 14.5 }, true);
-        mapInstanceRef.current = map;
-        mapReadyRef.current = true;
-
-        try { map.Ui.DPad.visible(false); } catch {}
-        try { map.Ui.Zoombar.visible(false); } catch {}
-        try { map.Ui.LayerSelector.visible(false); } catch {}
-        try { map.Ui.Terrain.visible(false); } catch {}
-
-        if (mapRef.current) {
-          const s = document.createElement('style');
-          s.textContent = `.ldmap_copyright,.ldmap-copyright,.ldmap_info,.longdo-copyright{font-size:9px!important;opacity:0.6;white-space:nowrap!important;overflow:hidden!important;text-overflow:ellipsis!important;max-width:200px!important}`;
-          mapRef.current.appendChild(s);
-        }
-
-        // ✅ After map is ready, draw any stops that arrived before init finished
-        if (pendingStopsRef.current.length > 0) {
-          redrawOverlays(pendingStopsRef.current, map);
-        }
-      } catch (err) {
-        console.error('Longdo Map init error:', err);
-      }
-    };
-
-    if ((window as any).longdo) {
-      initMap();
-    } else {
-      const script = document.querySelector('script[src*="longdo.com"]');
-      script?.addEventListener('load', initMap);
-      return () => script?.removeEventListener('load', initMap);
-    }
-  }, [redrawOverlays]); // stable dep
-
-  // ── Redraw overlays whenever stops change ──
-  useEffect(() => {
-    // Always keep pendingStopsRef up to date
-    pendingStopsRef.current = stops;
-
-    // If map isn't ready yet, initMap will pick up pendingStopsRef when it fires
-    if (!mapReadyRef.current || !mapInstanceRef.current) return;
-
-    redrawOverlays(stops, mapInstanceRef.current);
-  }, [stops, redrawOverlays]);
+  }, [stops]);
 
   const activeLyr = LAYER_OPTIONS.find(l => l.id === activeLayer)!;
 
@@ -487,7 +419,7 @@ const TripMap = ({ stops }: { stops: TripStop[] }) => {
     <div style={{ position: 'relative', width: '100%', height: '100%' }}>
       <div ref={mapRef} style={{ width: '100%', height: '100%' }} />
 
-      {/* Layer picker — top center */}
+      {/* Layer picker */}
       <div style={{ position: 'absolute', top: 10, left: '50%', transform: 'translateX(-50%)', zIndex: 10 }}>
         <motion.button
           whileTap={{ scale: 0.94 }}
@@ -734,7 +666,6 @@ Rules:
             text: summary || aiResponseText,
           }]);
         } catch {
-          // JSON parse failed — show raw response
           setMessages(prev => [...prev, { role: 'ai', text: aiResponseText }]);
         }
       } else {
@@ -852,7 +783,7 @@ Rules:
               zIndex: 20,
             }}
           >
-            {/* Drag handle — resize sheet */}
+            {/* Drag handle */}
             <div
               className="flex justify-center pt-3 pb-2"
               style={{ cursor: 'ns-resize', touchAction: 'none', userSelect: 'none' }}
