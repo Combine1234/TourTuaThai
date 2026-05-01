@@ -113,9 +113,36 @@ const FILTERS = [
 ];
 declare const longdo: any; // บอก TypeScript ว่า longdo มาจาก global script
 
+const LAYER_OPTIONS = [
+  { id: 'map' as const, label: 'Map', icon: '🗺️' },
+  { id: 'satellite' as const, label: 'Satellite', icon: '🛰️' },
+  { id: 'traffic' as const, label: 'Traffic', icon: '🚦' },
+];
+
 const TripMap = ({ stops }: { stops: TripStop[] }) => {
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<any>(null);
+  const [showLayerMenu, setShowLayerMenu] = useState(false);
+  const [activeLayer, setActiveLayer] = useState<'map' | 'satellite' | 'traffic'>('map');
+
+  const switchLayer = (layer: 'map' | 'satellite' | 'traffic') => {
+    const ld = (window as any).longdo;
+    const map = mapInstanceRef.current;
+    if (!map || !ld) return;
+    try { map.Layers.remove(ld.Layers.TRAFFIC); } catch {}
+    if (layer === 'satellite') {
+      // Longdo Maps uses GEOIMAGERY for satellite tiles; fall back to SATELLITE if present
+      const satLayer = ld.Layers.GEOIMAGERY ?? ld.Layers.SATELLITE ?? ld.Layers.HYBRID;
+      try { map.Layers.setBase(satLayer); } catch {}
+    } else {
+      try { map.Layers.setBase(ld.Layers.NORMAL); } catch {}
+      if (layer === 'traffic') {
+        try { map.Layers.add(ld.Layers.TRAFFIC); } catch {}
+      }
+    }
+    setActiveLayer(layer);
+    setShowLayerMenu(false);
+  };
 
   useEffect(() => {
     if (!mapRef.current) return;
@@ -138,6 +165,19 @@ const TripMap = ({ stops }: { stops: TripStop[] }) => {
         });
         map.location({ lon: 100.5, lat: 14.5 }, true);
         mapInstanceRef.current = map;
+
+        // Hide built-in controls
+        try { map.Ui.DPad.visible(false); } catch {}
+        try { map.Ui.Zoombar.visible(false); } catch {}
+        try { map.Ui.LayerSelector.visible(false); } catch {}
+        try { map.Ui.Terrain.visible(false); } catch {}
+
+        // Shrink Longdo Maps attribution/info text at bottom-right
+        if (mapRef.current) {
+          const s = document.createElement('style');
+          s.textContent = `.ldmap_copyright,.ldmap-copyright,.ldmap_info,.longdo-copyright{font-size:9px!important;opacity:0.6;white-space:nowrap!important;overflow:hidden!important;text-overflow:ellipsis!important;max-width:200px!important}`;
+          mapRef.current.appendChild(s);
+        }
 
         // วาง markers
         stops.forEach(stop => {
@@ -215,7 +255,64 @@ const TripMap = ({ stops }: { stops: TripStop[] }) => {
     };
   }, [stops]);
 
-  return <div ref={mapRef} style={{ width: '100%', height: '100%' }} />;
+  const activeLyr = LAYER_OPTIONS.find(l => l.id === activeLayer)!;
+
+  return (
+    <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+      <div ref={mapRef} style={{ width: '100%', height: '100%' }} />
+
+      {/* Layer picker — top center */}
+      <div style={{ position: 'absolute', top: 10, left: '50%', transform: 'translateX(-50%)', zIndex: 10 }}>
+        <motion.button
+          whileTap={{ scale: 0.94 }}
+          onClick={() => setShowLayerMenu(v => !v)}
+          style={{
+            background: BG, boxShadow: neuExSm, border: 'none', cursor: 'pointer',
+            borderRadius: 20, padding: '6px 14px', fontSize: 12, fontWeight: 600,
+            color: TEXT_DARK, display: 'flex', alignItems: 'center', gap: 6,
+            fontFamily: 'Poppins, sans-serif',
+          }}
+        >
+          {activeLyr.icon} {activeLyr.label}
+        </motion.button>
+
+        <AnimatePresence>
+          {showLayerMenu && (
+            <div style={{ position: 'absolute', top: 'calc(100% + 6px)', left: '50%', transform: 'translateX(-50%)' }}>
+              <motion.div
+                initial={{ opacity: 0, scale: 0.88, y: -6 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.88, y: -6 }}
+                transition={{ type: 'spring', damping: 22, stiffness: 320 }}
+                style={{
+                  background: BG, boxShadow: neuEx, borderRadius: 16, padding: 6,
+                  display: 'flex', flexDirection: 'column', gap: 3, minWidth: 130,
+                }}
+              >
+                {LAYER_OPTIONS.map(layer => (
+                  <button
+                    key={layer.id}
+                    onClick={() => switchLayer(layer.id)}
+                    style={{
+                      background: activeLayer === layer.id ? BLUE + '18' : 'transparent',
+                      border: `1.5px solid ${activeLayer === layer.id ? BLUE + '55' : 'transparent'}`,
+                      borderRadius: 10, padding: '7px 12px', cursor: 'pointer',
+                      fontSize: 12, fontWeight: 600,
+                      color: activeLayer === layer.id ? BLUE : TEXT_DARK,
+                      display: 'flex', alignItems: 'center', gap: 8,
+                      fontFamily: 'Poppins, sans-serif',
+                    }}
+                  >
+                    <span>{layer.icon}</span><span>{layer.label}</span>
+                  </button>
+                ))}
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>
+      </div>
+    </div>
+  );
 };
 
 const AI_MESSAGES: ChatMessage[] = [
@@ -243,6 +340,22 @@ export default function PlannerPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const filterBarRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const chatSheetRef = useRef<HTMLDivElement>(null);
+  const [chatHeightPct, setChatHeightPct] = useState(55);
+  const resizeDrag = useRef<{ startY: number; startH: number } | null>(null);
+
+  const onResizeDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.currentTarget.setPointerCapture(e.pointerId);
+    resizeDrag.current = { startY: e.clientY, startH: chatSheetRef.current?.offsetHeight ?? 0 };
+  };
+  const onResizeMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!resizeDrag.current || !chatSheetRef.current) return;
+    const dy = resizeDrag.current.startY - e.clientY;
+    const parentH = chatSheetRef.current.parentElement?.offsetHeight ?? 844;
+    const newPct = Math.max(30, Math.min(90, Math.round(((resizeDrag.current.startH + dy) / parentH) * 100)));
+    setChatHeightPct(newPct);
+  };
+  const onResizeUp = () => { resizeDrag.current = null; };
 
   // auto scroll
   useEffect(() => {
@@ -429,12 +542,19 @@ export default function PlannerPage() {
       <AnimatePresence>
         {showAI && (
           <motion.div
+            ref={chatSheetRef}
             initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
             transition={{ type: 'spring', damping: 28, stiffness: 300 }}
             className="absolute inset-x-0 bottom-0 rounded-t-3xl flex flex-col"
-            style={{ background: BG, boxShadow: `0 -8px 32px rgba(0,0,0,0.12), ${neuEx}`, height: '55%', zIndex: 20 }}>
+            style={{ background: BG, boxShadow: `0 -8px 32px rgba(0,0,0,0.12), ${neuEx}`, height: `${chatHeightPct}%`, zIndex: 20 }}>
 
-            <div className="flex justify-center pt-3 pb-2">
+            <div
+              className="flex justify-center pt-3 pb-2"
+              style={{ cursor: 'ns-resize', touchAction: 'none', userSelect: 'none' }}
+              onPointerDown={onResizeDown}
+              onPointerMove={onResizeMove}
+              onPointerUp={onResizeUp}
+            >
               <div className="w-10 h-1 rounded-full" style={{ background: '#c5cad1' }} />
             </div>
 
@@ -443,13 +563,7 @@ export default function PlannerPage() {
                 <div className="w-8 h-8 rounded-full flex items-center justify-center" style={{ background: BLUE, boxShadow: neuExSm }}>
                   <Bot size={16} color="#fff" />
                 </div>
-                <div>
-                  <div style={{ fontSize: 14, fontWeight: 700, color: TEXT_DARK }}>AI Trip Planner</div>
-                  <div className="flex items-center gap-1">
-                    <div className="w-1.5 h-1.5 rounded-full" style={{ background: GREEN }} />
-                    <span style={{ fontSize: 11, color: GREEN }}>Online</span>
-                  </div>
-                </div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: TEXT_DARK }}>AI Trip Planner</div>
               </div>
               <button onClick={() => setShowAI(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex' }}>
                 <X size={18} color={TEXT_MID} />
@@ -471,7 +585,7 @@ export default function PlannerPage() {
             )}
 
             {/* Messages */}
-            <div className="flex-1 overflow-y-auto px-4 pb-2" style={{ scrollbarWidth: 'none' }}>
+            <div className="flex-1 overflow-y-auto px-4 pt-4 pb-2" style={{ scrollbarWidth: 'none' }}>
               {messages.map((msg, i) => (
                 <div key={i} className={`flex mb-3 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                   <div className="max-w-[82%] px-4 py-3 rounded-2xl"
