@@ -9,6 +9,47 @@ import {
 } from 'lucide-react';
 import { BG, BLUE, GREEN, GOLD, TEXT_DARK, TEXT_MID, TEXT_LIGHT, neuEx, neuIn, neuExSm, neuBlueGlow } from '../neu';
 
+const OPENROUTER_API_KEY = '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'; // แนะนำให้ใส่ใน .env
+
+type ChatMessage = {
+  role: 'user' | 'ai';
+  text: string;
+};
+
+const callOpenRouter = async (chatHistory: ChatMessage[]) => {
+  try {
+    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${OPENROUTER_API_KEY}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": window.location.origin, // ✅ ดึง URL จริงอัตโนมัติ
+        "X-Title": "AI Trip Planner"
+      },
+      body: JSON.stringify({
+        "model": "openrouter/free", // ✅ เปลี่ยนชื่อโมเดล
+        "messages": chatHistory.map(m => ({
+          "role": m.role === 'ai' ? 'assistant' : 'user',
+          "content": m.text
+        })),
+      })
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      // ✅ แสดง error ละเอียดขึ้น
+      console.error("🚨 Full error response:", JSON.stringify(data, null, 2));
+      throw new Error(data.error?.message || data.error?.code || JSON.stringify(data));
+    }
+
+    return data.choices[0].message.content;
+
+  } catch (error) {
+    console.error("🚨 Fetch Error:", error);
+    throw error;
+  }
+};
 
 const FILTERS = [
   { id: 'province', label: 'Province', icon: Map, color: BLUE },
@@ -117,7 +158,7 @@ const TripMap = ({ activeDay }: { activeDay: number | null }) => {
   );
 };
 
-const AI_MESSAGES = [
+const AI_MESSAGES: ChatMessage[] = [
   { role: 'ai', text: "✨ I've crafted a 4-day Northern Thailand route for you! Starting in Bangkok, heading up to Ayutthaya's ancient temples, then Chiang Mai and Chiang Rai. Want me to adjust anything?" },
   { role: 'user', text: "Can you add more food stops in Chiang Mai?" },
   { role: 'ai', text: "🍜 Done! I've added Khao Soi Khun Yai for iconic Northern khao soi, Talad Warorot Night Bazaar for street food, and a Thai cooking class at Baan Thai. Day 3 is now a food lover's dream!" },
@@ -131,14 +172,32 @@ export default function PlannerPage() {
   const [input, setInput] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const sendMessage = () => {
+  const sendMessage = async () => {
     if (!input.trim()) return;
-    const userMsg = { role: 'user', text: input };
-    setMessages(m => [...m, userMsg]);
+
+    const userMsg: ChatMessage = { role: 'user', text: input };
+    const updatedMessages: ChatMessage[] = [...messages, userMsg];
+    
+    setMessages(updatedMessages);
     setInput('');
-    setTimeout(() => {
-      setMessages(m => [...m, { role: 'ai', text: "🗺️ Great suggestion! I've updated your itinerary to include that. Check the map — the route pins have shifted slightly to optimize the path." }]);
-    }, 900);
+
+    try {
+      const aiResponseText = await callOpenRouter(updatedMessages);
+      
+      const aiMsg: ChatMessage = { 
+        role: 'ai', 
+        text: aiResponseText 
+      };
+      setMessages(prev => [...prev, aiMsg]);
+    } catch (error: any) { // เติม : any หรือ : Error เข้าไปถ้าใช้ TypeScript
+      console.error("AI Error:", error);
+      
+      // 💡 เปลี่ยนจากข้อความ 😵‍💫 เป็นการดึง error.message ออกมาโชว์เลย
+      setMessages(prev => [...prev, { 
+        role: 'ai', 
+        text: `🚨 ล้มเหลว: ${error.message || "ไม่ทราบสาเหตุ ลองเช็ค Console (F12)"}` 
+      }]);
+    }
   };
 
   return (
