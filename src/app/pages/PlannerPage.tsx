@@ -14,7 +14,18 @@ import { BG, BLUE, GREEN, GOLD, TEXT_DARK, TEXT_MID, TEXT_LIGHT, neuEx, neuIn, n
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js`;
 
-const OPENROUTER_API_KEY = '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';
+const OPENROUTER_API_KEY = "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";
+
+type TripStop = {
+  city: string;
+  day: number;
+  lat: number;
+  lon: number;
+  color: string;
+  note?: string;
+};
+
+const COLORS = ['#1B73C6', '#10B981', '#F59E0B', '#8B5CF6', '#EF4444', '#06B6D4', '#F97316'];
 
 type ChatMessage = {
   role: 'user' | 'ai';
@@ -93,28 +104,16 @@ const FILTERS = [
 ];
 declare const longdo: any; // บอก TypeScript ว่า longdo มาจาก global script
 
-const TripMap = ({ activeDay }: { activeDay: number | null }) => {
+const TripMap = ({ stops }: { stops: TripStop[] }) => {
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<any>(null);
 
-  const stops = [
-    { city: 'Bangkok',    day: 1,    lat: 13.7563, lon: 100.5018, color: '#1B73C6' },
-    { city: 'Ayutthaya',  day: 2,    lat: 14.3532, lon: 100.5659, color: '#10B981' },
-    { city: 'Chiang Mai', day: 3,    lat: 18.7883, lon: 98.9853,  color: '#F59E0B' },
-    { city: 'Chiang Rai', day: 4,    lat: 19.9105, lon: 99.8406,  color: '#8B5CF6' },
-    { city: 'Phuket',     day: null, lat: 7.8804,  lon: 98.3923,  color: '#94A3B8' },
-    { city: 'Koh Samui',  day: null, lat: 9.5120,  lon: 100.0136, color: '#94A3B8' },
-    { city: 'Krabi',      day: null, lat: 8.0863,  lon: 98.9063,  color: '#94A3B8' },
-  ];
-
   useEffect(() => {
-    // ✅ รอให้ mapRef และ longdo พร้อมก่อน
     if (!mapRef.current) return;
 
     const initMap = () => {
       if (!(window as any).longdo) return;
 
-      // ✅ ถ้ามี map เก่าอยู่แล้ว ให้ destroy ก่อน
       if (mapInstanceRef.current) {
         try { mapInstanceRef.current.Overlays.clear(); } catch {}
         mapInstanceRef.current = null;
@@ -123,43 +122,43 @@ const TripMap = ({ activeDay }: { activeDay: number | null }) => {
 
       try {
         const longdo = (window as any).longdo;
-
         const map = new longdo.Map({
           placeholder: mapRef.current,
           zoom: 6,
           lastView: false,
         });
-
         map.location({ lon: 100.5, lat: 14.5 }, true);
         mapInstanceRef.current = map;
 
         // วาง markers
         stops.forEach(stop => {
-          const isRoute = stop.day !== null;
-          const isActive = activeDay === null || stop.day === activeDay;
-
           const marker = new longdo.Marker(
             { lon: stop.lon, lat: stop.lat },
             {
               title: stop.city,
-              detail: isRoute ? `Day ${stop.day}` : stop.city,
+              detail: `Day ${stop.day}${stop.note ? ': ' + stop.note : ''}`,
               icon: {
                 html: `<div style="
-                  background: ${isActive ? stop.color : '#94A3B8'};
+                  background: ${stop.color};
                   color: white;
                   border-radius: 50%;
-                  width: ${isRoute ? 32 : 20}px;
-                  height: ${isRoute ? 32 : 20}px;
+                  width: 34px;
+                  height: 34px;
                   display: flex;
                   align-items: center;
                   justify-content: center;
-                  font-size: ${isRoute ? 11 : 9}px;
+                  font-size: 11px;
                   font-weight: 700;
                   border: 2.5px solid white;
-                  box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+                  box-shadow: 0 2px 8px rgba(0,0,0,0.25);
                   font-family: Poppins, sans-serif;
-                ">${isRoute ? `D${stop.day}` : '•'}</div>`,
-                offset: { x: isRoute ? 16 : 10, y: isRoute ? 16 : 10 },
+                  flex-direction: column;
+                  line-height: 1.1;
+                ">
+                  <span style="font-size:8px;opacity:0.85">D${stop.day}</span>
+                  <span style="font-size:7px;max-width:28px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${stop.city.split(' ')[0]}</span>
+                </div>`,
+                offset: { x: 17, y: 17 },
               },
             }
           );
@@ -167,25 +166,24 @@ const TripMap = ({ activeDay }: { activeDay: number | null }) => {
         });
 
         // วาดเส้นทาง
-        const routeStops = stops
-          .filter(s => s.day !== null)
-          .sort((a, b) => (a.day ?? 0) - (b.day ?? 0));
-
-        for (let i = 1; i < routeStops.length; i++) {
-          const prev = routeStops[i - 1];
-          const curr = routeStops[i];
-          const isActive = activeDay === null || curr.day === activeDay || prev.day === activeDay;
-
+        const sorted = [...stops].sort((a, b) => a.day - b.day);
+        for (let i = 1; i < sorted.length; i++) {
+          const prev = sorted[i - 1];
+          const curr = sorted[i];
           const line = new longdo.Polyline(
             [{ lon: prev.lon, lat: prev.lat }, { lon: curr.lon, lat: curr.lat }],
-            {
-              lineColor: curr.color,
-              lineWidth: 3,
-              lineStyle: longdo.LineStyle.Dash,
-              opacity: isActive ? 1 : 0.3,
-            }
+            { lineColor: curr.color, lineWidth: 3, lineStyle: longdo.LineStyle.Dash, opacity: 0.8 }
           );
           map.Overlays.add(line);
+        }
+
+        // zoom to fit ถ้ามี stops
+        if (stops.length > 0) {
+          const lats = stops.map(s => s.lat);
+          const lons = stops.map(s => s.lon);
+          const centerLat = (Math.min(...lats) + Math.max(...lats)) / 2;
+          const centerLon = (Math.min(...lons) + Math.max(...lons)) / 2;
+          map.location({ lon: centerLon, lat: centerLat }, true);
         }
 
       } catch (err) {
@@ -193,7 +191,6 @@ const TripMap = ({ activeDay }: { activeDay: number | null }) => {
       }
     };
 
-    // ✅ ถ้า longdo โหลดแล้ว init เลย ถ้ายังไม่โหลดให้รอ
     if ((window as any).longdo) {
       initMap();
     } else {
@@ -207,7 +204,7 @@ const TripMap = ({ activeDay }: { activeDay: number | null }) => {
         try { mapInstanceRef.current.Overlays.clear(); } catch {}
       }
     };
-  }, [activeDay]);
+  }, [stops]);
 
   return <div ref={mapRef} style={{ width: '100%', height: '100%' }} />;
 };
@@ -280,6 +277,15 @@ export default function PlannerPage() {
     }
     e.target.value = '';
   };
+  const DEFAULT_STOPS: TripStop[] = [
+    { city: 'Bangkok',    day: 1, lat: 13.7563, lon: 100.5018, color: COLORS[0] },
+    { city: 'Ayutthaya',  day: 2, lat: 14.3532, lon: 100.5659, color: COLORS[1] },
+    { city: 'Chiang Mai', day: 3, lat: 18.7883, lon: 98.9853,  color: COLORS[2] },
+    { city: 'Chiang Rai', day: 4, lat: 19.9105, lon: 99.8406,  color: COLORS[3] },
+  ];
+
+  // ใน PlannerPage component เพิ่ม:
+  const [tripStops, setTripStops] = useState<TripStop[]>(DEFAULT_STOPS);
 
   const sendMessage = async () => {
     if (!input.trim() && !attachedFile) return;
@@ -295,24 +301,59 @@ export default function PlannerPage() {
     setAttachedFile(null);
     setIsLoading(true);
 
-    // ✅ รวม context ทุกไฟล์เป็น system prompt
     const combinedContext = pdfTexts
       .map(p => `=== ${p.name} ===\n${p.text}`)
       .join('\n\n')
-      .slice(0, 8000);
+      .slice(0, 6000);
 
-    const systemPrompt = pdfTexts.length > 0
-      ? `You are a travel assistant. The user has shared these PDF documents:\n\n${combinedContext}\n\nAnswer based on these documents.`
-      : undefined;
+    // ✅ system prompt บอก AI ให้ตอบ 2 ส่วน
+    const systemPrompt = `You are a Thailand travel assistant. 
+      ${pdfTexts.length > 0 ? `The user has shared PDF documents:\n${combinedContext}\n\n` : ''}
+      Whenever you recommend ANY places, restaurants, attractions, or locations — ALWAYS respond in this EXACT format:
+
+      TRIP_JSON:{"stops":[{"city":"Place Name","day":1,"lat":13.7563,"lon":100.5018,"note":"Short description"}]}
+      SUMMARY:Your friendly summary text here.
+
+      Rules:
+      - ALWAYS include TRIP_JSON whenever you mention specific places, even for lunch spots or restaurants.
+      - Use accurate real GPS coordinates for every place.
+      - For multiple places recommended together, use day:1 for all unless the user specifies different days.
+      - Always respond in the same language the user uses.`;
 
     const apiHistory: ChatMessage[] = [
       ...messages,
-      { role: 'user', text: input || 'Please summarize this document' },
+      { role: 'user', text: input },
     ];
 
     try {
       const aiResponseText = await callOpenRouter(apiHistory, systemPrompt);
-      setMessages(prev => [...prev, { role: 'ai', text: aiResponseText }]);
+      
+      // ✅ parse TRIP_JSON ถ้ามี
+      const jsonMatch = aiResponseText.match(/TRIP_JSON:(\{[\s\S]*?\})\s*\nSUMMARY:/);
+      const summaryMatch = aiResponseText.match(/SUMMARY:([\s\S]*)/);
+
+      if (jsonMatch && summaryMatch) {
+        try {
+          const parsed = JSON.parse(jsonMatch[1]);
+          const newStops: TripStop[] = parsed.stops.map((s: any, i: number) => ({
+            ...s,
+            color: COLORS[i % COLORS.length],
+          }));
+          setTripStops(newStops);
+
+          // แสดงแค่ summary ใน chat
+          setMessages(prev => [...prev, { 
+            role: 'ai', 
+            text: '🗺️ ' + summaryMatch[1].trim() 
+          }]);
+        } catch {
+          // JSON parse ล้มเหลว แสดงข้อความดิบ
+          setMessages(prev => [...prev, { role: 'ai', text: aiResponseText }]);
+        }
+      } else {
+        setMessages(prev => [...prev, { role: 'ai', text: aiResponseText }]);
+      }
+
     } catch (error: any) {
       setMessages(prev => [...prev, {
         role: 'ai',
@@ -344,7 +385,7 @@ export default function PlannerPage() {
 
       {/* Map Area */}
       <div className="flex-1 relative mx-4 rounded-3xl overflow-hidden" style={{ boxShadow: neuIn, minHeight: 0 }}>
-        <TripMap activeDay={null} />
+        <TripMap stops={tripStops} />
         <div className="absolute right-3 top-3 flex flex-col gap-2">
           {[Settings, Undo2, Redo2, BookMarked, Save].map((Icon, i) => (
             <motion.button key={i} whileTap={{ scale: 0.88 }} onClick={i === 0 ? () => navigate('/onboarding/personality') : undefined}
