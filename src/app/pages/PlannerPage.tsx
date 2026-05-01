@@ -9,21 +9,15 @@ import {
 } from 'lucide-react';
 import { BG, BLUE, GREEN, GOLD, TEXT_DARK, TEXT_MID, TEXT_LIGHT, neuEx, neuIn, neuExSm, neuBlueGlow } from '../neu';
 
-const DAYS = [
-  { day: 1, city: 'Bangkok', color: '#1B73C6', stops: ['Grand Palace', 'Wat Pho', 'Chatuchak Market'] },
-  { day: 2, city: 'Ayutthaya', color: '#10B981', stops: ['Wat Mahathat', 'Wat Chai Watthanaram', 'Elephant Camp'] },
-  { day: 3, city: 'Chiang Mai', color: '#F59E0B', stops: ['Doi Inthanon', 'Nimman Road', 'Sunday Walking Street'] },
-  { day: 4, city: 'Chiang Rai', color: '#8B5CF6', stops: ['White Temple', 'Blue Temple', 'Golden Triangle'] },
-];
 
 const FILTERS = [
-  { id: 'province', label: 'Province', icon: Map },
-  { id: 'crowds', label: 'Crowds', icon: Users },
-  { id: 'authentic', label: 'Authentic', icon: Star },
-  { id: 'weather', label: 'Weather', icon: Cloud },
-  { id: 'transport', label: 'Transport', icon: Zap },
-  { id: 'hotspots', label: 'Hotspots', icon: Compass },
-  { id: 'secrets', label: 'Local Secrets', icon: Lock },
+  { id: 'province', label: 'Province', icon: Map, color: BLUE },
+  { id: 'crowds', label: 'Crowds', icon: Users, color: GREEN },
+  { id: 'authentic', label: 'Authentic', icon: Star, color: GOLD },
+  { id: 'weather', label: 'Weather', icon: Cloud, color: BLUE },
+  { id: 'transport', label: 'Transport', icon: Zap, color: GREEN },
+  { id: 'hotspots', label: 'Hotspots', icon: Compass, color: GOLD },
+  { id: 'secrets', label: 'Local Secrets', icon: Lock, color: BLUE },
 ];
 
 // Mock Thailand SVG Map with Routes
@@ -132,7 +126,6 @@ const AI_MESSAGES = [
 export default function PlannerPage() {
   const navigate = useNavigate();
   const [activeFilter, setActiveFilter] = useState<string | null>(null);
-  const [activeDay, setActiveDay] = useState<number | null>(null);
   const [showAI, setShowAI] = useState(false);
   const [messages, setMessages] = useState(AI_MESSAGES);
   const [input, setInput] = useState('');
@@ -150,10 +143,9 @@ export default function PlannerPage() {
 
   return (
     <div className="flex flex-col h-full relative overflow-hidden" style={{ background: BG, fontFamily: 'Poppins, sans-serif' }}>
-      {/* Top Nav */}
-      <div className="flex-shrink-0 px-4 pt-10 pb-3" style={{ zIndex: 10 }}>
-        {/* Filter pills row */}
-        <div className="flex gap-2 overflow-x-auto pb-2" style={{ scrollbarWidth: 'none' }}>
+      {/* Filter pills */}
+      <div className="flex-shrink-0 pt-10 px-4 pb-3" style={{ zIndex: 10 }}>
+        <div className="flex gap-2 overflow-x-auto rounded-3xl px-3 py-2.5" style={{ scrollbarWidth: 'none', boxShadow: neuIn }}>
           {FILTERS.map(f => {
             const Icon = f.icon;
             const active = activeFilter === f.id;
@@ -166,8 +158,8 @@ export default function PlannerPage() {
                 style={{
                   background: BG,
                   boxShadow: active ? neuIn : neuExSm,
-                  color: active ? BLUE : TEXT_MID,
-                  border: active ? `1.5px solid ${BLUE}` : '1.5px solid transparent',
+                  color: active ? f.color : f.color + 'AA',
+                  border: `1.5px solid ${active ? f.color : f.color + '55'}`,
                   fontSize: 12,
                   fontWeight: 600,
                   cursor: 'pointer',
@@ -185,47 +177,7 @@ export default function PlannerPage() {
 
       {/* Map Area */}
       <div className="flex-1 relative mx-4 rounded-3xl overflow-hidden" style={{ boxShadow: neuIn, minHeight: 0 }}>
-        <TripMap activeDay={activeDay} />
-
-        {/* Day selector overlay - left side */}
-        <div className="absolute left-3 top-1/2 -translate-y-1/2 flex flex-col gap-2">
-          {DAYS.map(d => (
-            <motion.button
-              key={d.day}
-              whileTap={{ scale: 0.9 }}
-              onClick={() => setActiveDay(activeDay === d.day ? null : d.day)}
-              className="w-10 h-10 rounded-full flex items-center justify-center"
-              style={{
-                background: BG,
-                boxShadow: activeDay === d.day ? neuIn : neuExSm,
-                border: `2px solid ${d.color}`,
-                color: d.color,
-                fontSize: 13,
-                fontWeight: 700,
-                cursor: 'pointer',
-              }}
-            >
-              D{d.day}
-            </motion.button>
-          ))}
-          <motion.button
-            whileTap={{ scale: 0.9 }}
-            onClick={() => setActiveDay(null)}
-            className="w-10 h-10 rounded-full flex items-center justify-center"
-            style={{
-              background: BG,
-              boxShadow: activeDay === null ? neuIn : neuExSm,
-              color: TEXT_MID,
-              fontSize: 9,
-              fontWeight: 700,
-              cursor: 'pointer',
-              border: '1.5px solid #c5cad1',
-              fontFamily: 'Poppins, sans-serif',
-            }}
-          >
-            ALL
-          </motion.button>
-        </div>
+        <TripMap activeDay={null} />
 
         {/* Right Toolbar */}
         <div className="absolute right-3 top-3 flex flex-col gap-2">
@@ -241,20 +193,6 @@ export default function PlannerPage() {
           ))}
         </div>
 
-        {/* Day info chip on map */}
-        {activeDay !== null && (
-          <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="absolute top-3 left-1/2 -translate-x-1/2 px-4 py-2 rounded-full flex items-center gap-2"
-            style={{ background: BG, boxShadow: neuExSm }}
-          >
-            <div className="w-3 h-3 rounded-full" style={{ background: DAYS[activeDay - 1]?.color }} />
-            <span style={{ fontSize: 12, fontWeight: 600, color: TEXT_DARK }}>
-              Day {activeDay} — {DAYS[activeDay - 1]?.city}
-            </span>
-          </motion.div>
-        )}
       </div>
 
       {/* Bottom bar */}
