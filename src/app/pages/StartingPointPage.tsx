@@ -94,9 +94,17 @@ export default function StartingPointPage() {
           <div>
             <div style={{ fontSize: 11, color: TEXT_LIGHT, letterSpacing: 1.5 }}>STEP 3 OF 3</div>
             <div className="flex gap-1.5 mt-1">
-              {[1, 2, 3].map(i => (
-                <div key={i} className="h-1 rounded-full"
-                  style={{ width: 24, background: '#F0A500' }} />
+              {(['/onboarding/personality', '/onboarding/interests', '/onboarding/starting-point'] as const).map(route => (
+                <button
+                  key={route}
+                  onClick={() => navigate(route)}
+                  style={{
+                    width: 24, height: 4,
+                    borderRadius: 999,
+                    background: '#F0A500',
+                    border: 'none', padding: 0, cursor: 'pointer',
+                  }}
+                />
               ))}
             </div>
           </div>

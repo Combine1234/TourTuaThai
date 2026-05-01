@@ -1,8 +1,65 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useNavigate } from 'react-router';
 import { motion } from 'motion/react';
 import { ChevronRight, User } from 'lucide-react';
 import { BG, BLUE, TEXT_DARK, TEXT_MID, TEXT_LIGHT, neuEx, neuIn, neuExSm } from '../neu';
+
+function NeuSlider({ value, onChange }: { value: number; onChange: (v: number) => void }) {
+  const trackRef = useRef<HTMLDivElement>(null);
+  const dragging = useRef(false);
+
+  const snap = (clientX: number) => {
+    if (!trackRef.current) return;
+    const { left, width } = trackRef.current.getBoundingClientRect();
+    const ratio = Math.max(0, Math.min(1, (clientX - left) / width));
+    onChange(Math.round(ratio * 4) + 1);
+  };
+
+  const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    dragging.current = true;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    snap(e.clientX);
+  };
+  const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (dragging.current) snap(e.clientX);
+  };
+  const onPointerUp = () => { dragging.current = false; };
+
+  const pct = ((value - 1) / 4) * 100;
+
+  return (
+    <div>
+      <div
+        ref={trackRef}
+        className="relative flex items-center"
+        style={{ height: 36, cursor: 'grab', touchAction: 'none', userSelect: 'none' }}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+      >
+        {/* Inset track */}
+        <div className="relative w-full h-3 rounded-full" style={{ background: BG, boxShadow: neuIn }}>
+          <div className="absolute left-0 top-0 h-full rounded-full"
+            style={{ width: `${pct}%`, background: `linear-gradient(90deg, ${BLUE}88, ${BLUE})` }} />
+        </div>
+        {/* Knob */}
+        <motion.div
+          className="absolute w-7 h-7 rounded-full"
+          animate={{ left: `calc(${pct}% - 14px)` }}
+          transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+          style={{ background: BG, boxShadow: neuEx, border: `2px solid ${BLUE}`, zIndex: 2 }}
+        />
+      </div>
+      {/* Step dots */}
+      <div className="flex justify-between mt-2 px-1">
+        {[1, 2, 3, 4, 5].map(n => (
+          <div key={n} className="w-1.5 h-1.5 rounded-full"
+            style={{ background: n <= value ? BLUE : '#c5cad1' }} />
+        ))}
+      </div>
+    </div>
+  );
+}
 
 interface SliderItem {
   id: string;
@@ -42,9 +99,18 @@ export default function PersonalityPage() {
           <div>
             <div style={{ fontSize: 11, color: TEXT_LIGHT, letterSpacing: 1.5 }}>STEP 1 OF 3</div>
             <div className="flex gap-1.5 mt-1">
-              {[1, 2, 3].map(i => (
-                <div key={i} className="h-1 rounded-full transition-all"
-                  style={{ width: i === 1 ? 24 : 8, background: i === 1 ? BLUE : '#c5cad1' }} />
+              {(['/onboarding/personality', '/onboarding/interests', '/onboarding/starting-point'] as const).map((route, idx) => (
+                <button
+                  key={route}
+                  onClick={() => navigate(route)}
+                  style={{
+                    width: idx === 0 ? 24 : 8, height: 4,
+                    borderRadius: 999,
+                    background: idx === 0 ? BLUE : '#c5cad1',
+                    border: 'none', padding: 0, cursor: 'pointer',
+                    transition: 'all 0.2s',
+                  }}
+                />
               ))}
             </div>
           </div>
@@ -74,49 +140,10 @@ export default function PersonalityPage() {
               </span>
             </div>
 
-            {/* Custom Slider Track */}
-            <div className="relative flex items-center" style={{ height: 36 }}>
-              {/* Inset track */}
-              <div className="relative w-full h-3 rounded-full"
-                style={{ background: BG, boxShadow: neuIn }}>
-                {/* Fill */}
-                <div className="absolute left-0 top-0 h-full rounded-full transition-all"
-                  style={{
-                    width: `${((slider.value - 1) / 4) * 100}%`,
-                    background: `linear-gradient(90deg, ${BLUE}88, ${BLUE})`,
-                  }} />
-              </div>
-
-              {/* Knob */}
-              <div
-                className="absolute w-7 h-7 rounded-full cursor-pointer"
-                style={{
-                  left: `calc(${((slider.value - 1) / 4) * 100}% - 14px)`,
-                  background: BG,
-                  boxShadow: neuEx,
-                  border: `2px solid ${BLUE}`,
-                  zIndex: 2,
-                }}
-              />
-
-              {/* Invisible range input on top */}
-              <input
-                type="range"
-                min={1} max={5} step={1}
-                value={slider.value}
-                onChange={e => updateSlider(slider.id, parseInt(e.target.value))}
-                className="absolute inset-0 w-full opacity-0 cursor-pointer"
-                style={{ height: '100%' }}
-              />
-            </div>
-
-            {/* Step dots */}
-            <div className="flex justify-between mt-2 px-1">
-              {[1, 2, 3, 4, 5].map(n => (
-                <div key={n} className="w-1.5 h-1.5 rounded-full"
-                  style={{ background: n <= slider.value ? BLUE : '#c5cad1' }} />
-              ))}
-            </div>
+            <NeuSlider
+              value={slider.value}
+              onChange={v => updateSlider(slider.id, v)}
+            />
           </motion.div>
         ))}
       </div>

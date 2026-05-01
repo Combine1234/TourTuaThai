@@ -1,11 +1,11 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Settings, Undo2, Redo2, BookMarked, Save,
-  Bot, Send, List, X, ChevronUp, Map,
+  Bot, Send, List, X, Map,
   Cloud, Users, Star, Compass, Zap, Lock,
-  Mic
+  Mic, Paperclip, FileText,
 } from 'lucide-react';
 import { BG, BLUE, GREEN, GOLD, TEXT_DARK, TEXT_MID, TEXT_LIGHT, neuEx, neuIn, neuExSm, neuBlueGlow } from '../neu';
 
@@ -117,27 +117,78 @@ const TripMap = ({ activeDay }: { activeDay: number | null }) => {
   );
 };
 
-const AI_MESSAGES = [
+interface Message {
+  role: string;
+  text: string;
+  file?: { name: string; size: string };
+}
+
+const AI_MESSAGES: Message[] = [
   { role: 'ai', text: "✨ I've crafted a 4-day Northern Thailand route for you! Starting in Bangkok, heading up to Ayutthaya's ancient temples, then Chiang Mai and Chiang Rai. Want me to adjust anything?" },
   { role: 'user', text: "Can you add more food stops in Chiang Mai?" },
   { role: 'ai', text: "🍜 Done! I've added Khao Soi Khun Yai for iconic Northern khao soi, Talad Warorot Night Bazaar for street food, and a Thai cooking class at Baan Thai. Day 3 is now a food lover's dream!" },
 ];
 
+function formatSize(bytes: number) {
+  return bytes < 1024 * 1024
+    ? `${(bytes / 1024).toFixed(0)} KB`
+    : `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 export default function PlannerPage() {
   const navigate = useNavigate();
   const [activeFilter, setActiveFilter] = useState<string | null>(null);
   const [showAI, setShowAI] = useState(false);
-  const [messages, setMessages] = useState(AI_MESSAGES);
+  const [messages, setMessages] = useState<Message[]>(AI_MESSAGES);
   const [input, setInput] = useState('');
+  const [attachedFile, setAttachedFile] = useState<{ name: string; size: string } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const filterBarRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const el = filterBarRef.current;
+    if (!el) return;
+    let isDown = false, startX = 0, scrollLeft = 0;
+    const onMouseDown = (e: MouseEvent) => { isDown = true; startX = e.clientX; scrollLeft = el.scrollLeft; };
+    const onMouseMove = (e: MouseEvent) => {
+      if (!isDown) return;
+      el.scrollLeft = scrollLeft - (e.clientX - startX);
+    };
+    const onMouseUp = () => { isDown = false; };
+    const onWheel = (e: WheelEvent) => { e.preventDefault(); el.scrollLeft += e.deltaY + e.deltaX; };
+    el.addEventListener('mousedown', onMouseDown);
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => {
+      el.removeEventListener('mousedown', onMouseDown);
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+      el.removeEventListener('wheel', onWheel);
+    };
+  }, []);
+
+  const onFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    if (f) setAttachedFile({ name: f.name, size: formatSize(f.size) });
+    e.target.value = '';
+  };
 
   const sendMessage = () => {
-    if (!input.trim()) return;
-    const userMsg = { role: 'user', text: input };
+    if (!input.trim() && !attachedFile) return;
+    const userMsg: Message = { role: 'user', text: input, ...(attachedFile ? { file: attachedFile } : {}) };
     setMessages(m => [...m, userMsg]);
     setInput('');
+    const hadFile = !!attachedFile;
+    setAttachedFile(null);
     setTimeout(() => {
-      setMessages(m => [...m, { role: 'ai', text: "🗺️ Great suggestion! I've updated your itinerary to include that. Check the map — the route pins have shifted slightly to optimize the path." }]);
+      setMessages(m => [...m, {
+        role: 'ai',
+        text: hadFile
+          ? "📄 Got it! I've read through your document and I'm incorporating those plans into the itinerary now."
+          : "🗺️ Great suggestion! I've updated your itinerary to include that. Check the map — the route pins have shifted slightly to optimize the path.",
+      }]);
     }, 900);
   };
 
@@ -145,7 +196,7 @@ export default function PlannerPage() {
     <div className="flex flex-col h-full relative overflow-hidden" style={{ background: BG, fontFamily: 'Poppins, sans-serif' }}>
       {/* Filter pills */}
       <div className="flex-shrink-0 pt-10 px-4 pb-3" style={{ zIndex: 10 }}>
-        <div className="flex gap-2 overflow-x-auto rounded-3xl px-3 py-2.5" style={{ scrollbarWidth: 'none', boxShadow: neuIn }}>
+        <div ref={filterBarRef} className="flex gap-2 overflow-x-auto rounded-3xl px-3 py-2.5" style={{ scrollbarWidth: 'none', boxShadow: neuIn, cursor: 'grab' }}>
           {FILTERS.map(f => {
             const Icon = f.icon;
             const active = activeFilter === f.id;
@@ -185,6 +236,7 @@ export default function PlannerPage() {
             <motion.button
               key={i}
               whileTap={{ scale: 0.88 }}
+              onClick={i === 0 ? () => navigate('/onboarding/personality') : undefined}
               className="w-9 h-9 rounded-full flex items-center justify-center"
               style={{ background: BG, boxShadow: neuExSm, border: 'none', cursor: 'pointer' }}
             >
@@ -292,34 +344,83 @@ export default function PlannerPage() {
                       borderBottomRightRadius: msg.role === 'user' ? 4 : 16,
                     }}
                   >
-                    {msg.text}
+                    {msg.file && (
+                      <div className="flex items-center gap-2 mb-2 px-2 py-1.5 rounded-xl"
+                        style={{ background: msg.role === 'user' ? 'rgba(255,255,255,0.15)' : BG, boxShadow: msg.role === 'ai' ? neuExSm : 'none' }}>
+                        <FileText size={14} color={msg.role === 'user' ? '#fff' : BLUE} />
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 11, fontWeight: 600, color: msg.role === 'user' ? '#fff' : TEXT_DARK, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{msg.file.name}</div>
+                          <div style={{ fontSize: 10, color: msg.role === 'user' ? 'rgba(255,255,255,0.7)' : TEXT_LIGHT }}>{msg.file.size}</div>
+                        </div>
+                      </div>
+                    )}
+                    {msg.text && msg.text}
                   </div>
                 </div>
               ))}
             </div>
 
             {/* Input */}
-            <div className="px-4 pb-6 pt-2 flex gap-2">
-              <div className="flex-1 flex items-center gap-2 px-4 py-2.5 rounded-2xl"
-                style={{ background: BG, boxShadow: neuIn }}>
+            <div className="px-4 pb-6 pt-2 flex flex-col gap-2">
+              {/* Attachment preview */}
+              <AnimatePresence>
+                {attachedFile && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: 6 }}
+                    className="flex items-center gap-2 px-3 py-2 rounded-xl"
+                    style={{ background: BLUE + '18', border: `1px solid ${BLUE}44` }}
+                  >
+                    <FileText size={14} color={BLUE} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 11, fontWeight: 600, color: TEXT_DARK, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{attachedFile.name}</div>
+                      <div style={{ fontSize: 10, color: TEXT_LIGHT }}>{attachedFile.size}</div>
+                    </div>
+                    <button onClick={() => setAttachedFile(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', padding: 2 }}>
+                      <X size={12} color={TEXT_MID} />
+                    </button>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              <div className="flex gap-2">
+                {/* Hidden file input */}
                 <input
-                  ref={inputRef}
-                  className="flex-1 bg-transparent outline-none"
-                  style={{ color: TEXT_DARK, fontSize: 13, border: 'none', fontFamily: 'Poppins, sans-serif' }}
-                  placeholder="Ask me to edit your trip..."
-                  value={input}
-                  onChange={e => setInput(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && sendMessage()}
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".pdf,.doc,.docx,.txt"
+                  style={{ display: 'none' }}
+                  onChange={onFileChange}
                 />
+                <div className="flex-1 flex items-center gap-2 px-3 py-2.5 rounded-2xl"
+                  style={{ background: BG, boxShadow: neuIn }}>
+                  <motion.button
+                    whileTap={{ scale: 0.88 }}
+                    onClick={() => fileInputRef.current?.click()}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 2, display: 'flex', flexShrink: 0 }}
+                  >
+                    <Paperclip size={15} color={attachedFile ? BLUE : TEXT_LIGHT} />
+                  </motion.button>
+                  <input
+                    ref={inputRef}
+                    className="flex-1 bg-transparent outline-none"
+                    style={{ color: TEXT_DARK, fontSize: 13, border: 'none', fontFamily: 'Poppins, sans-serif' }}
+                    placeholder="Ask me to edit your trip..."
+                    value={input}
+                    onChange={e => setInput(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && sendMessage()}
+                  />
+                </div>
+                <motion.button
+                  whileTap={{ scale: 0.9 }}
+                  onClick={sendMessage}
+                  className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0"
+                  style={{ background: BLUE, boxShadow: neuExSm, border: 'none', cursor: 'pointer' }}
+                >
+                  <Send size={15} color="#fff" />
+                </motion.button>
               </div>
-              <motion.button
-                whileTap={{ scale: 0.9 }}
-                onClick={sendMessage}
-                className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0"
-                style={{ background: BLUE, boxShadow: neuExSm, border: 'none', cursor: 'pointer' }}
-              >
-                <Send size={15} color="#fff" />
-              </motion.button>
             </div>
           </motion.div>
         )}
