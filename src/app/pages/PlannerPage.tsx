@@ -4,28 +4,27 @@ import { motion, AnimatePresence } from 'motion/react';
 
 // @ts-ignore: pdfjs-dist does not ship with TypeScript declarations in this project
 import * as pdfjsLib from 'pdfjs-dist';
+import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import {
   Settings, Undo2, Redo2, BookMarked, Save,
-  Bot, Send, List, X, Map,
+  Bot, Send, List, X, Map as MapIcon,
   Cloud, Users, Star, Compass, Zap, Lock,
-  Mic, Paperclip, FileText,
+  Mic, Paperclip, FileText, Download,
 } from 'lucide-react';
 import { BG, BLUE, GREEN, GOLD, TEXT_DARK, TEXT_MID, TEXT_LIGHT, neuEx, neuIn, neuExSm, neuBlueGlow } from '../neu';
+import {
+  defaultGeneratedTrip,
+  exportTripToPdf,
+  loadGeneratedTrip,
+  normalizeGeneratedTrip,
+  saveGeneratedTrip,
+  type GeneratedTrip,
+  type TripStop,
+} from '../tripData';
 
-pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js`;
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
-const OPENROUTER_API_KEY = "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";
-
-type TripStop = {
-  city: string;
-  day: number;
-  lat: number;
-  lon: number;
-  color: string;
-  note?: string;
-};
-
-const COLORS = ['#1B73C6', '#10B981', '#F59E0B', '#8B5CF6', '#EF4444', '#06B6D4', '#F97316'];
+const OPENROUTER_API_KEY = import.meta.env.VITE_OPENROUTER_KEY;
 
 type ChatMessage = {
   role: 'user' | 'ai';
@@ -39,6 +38,147 @@ const MODELS = [
   "meta-llama/llama-3.1-8b-instruct:free",
   "openrouter/free",
 ];
+
+const geocodeCache = new Map<string, { lat: number; lon: number }>();
+
+const extractBalancedJson = (text: string, startIndex: number) => {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  let started = false;
+  let jsonText = '';
+
+  for (let i = startIndex; i < text.length; i++) {
+    const ch = text[i];
+
+    if (!started) {
+      if (ch !== '{') continue;
+      started = true;
+    }
+
+    jsonText += ch;
+
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (ch === '\\') {
+        escaped = true;
+      } else if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (ch === '"') {
+      inString = true;
+      continue;
+    }
+
+    if (ch === '{') depth += 1;
+    if (ch === '}') depth -= 1;
+
+    if (started && depth === 0) {
+      return jsonText;
+    }
+  }
+
+  return null;
+};
+
+const extractTripPayloadFromResponse = (responseText: string) => {
+  const markerIndex = responseText.indexOf('TRIP_JSON:');
+  if (markerIndex === -1) return null;
+
+  const jsonText = extractBalancedJson(responseText, markerIndex + 'TRIP_JSON:'.length);
+  if (!jsonText) return null;
+
+  const summaryIndex = responseText.indexOf('SUMMARY:', markerIndex + 'TRIP_JSON:'.length);
+  const externalSummary = summaryIndex >= 0 ? responseText.slice(summaryIndex + 'SUMMARY:'.length).trim() : '';
+
+  try {
+    const parsed = JSON.parse(jsonText);
+    const summary = typeof parsed?.summary === 'string' ? parsed.summary.trim() : '';
+    return {
+      jsonText: jsonText.trim(),
+      summary: externalSummary || summary,
+    };
+  } catch {
+    return {
+      jsonText: jsonText.trim(),
+      summary: externalSummary,
+    };
+  }
+};
+
+const geocodeProvinceOrCity = async (query: string) => {
+  const normalized = query.trim().toLowerCase();
+  if (!normalized) return null;
+  if (geocodeCache.has(normalized)) return geocodeCache.get(normalized)!;
+
+  const variants = [
+    `${query}, Thailand`,
+    `${query}, จังหวัด, Thailand`,
+    `${query}, ประเทศไทย`,
+  ];
+
+  for (const variant of variants) {
+    try {
+      const response = await fetch(
+        `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=th&q=${encodeURIComponent(variant)}`,
+        {
+          headers: {
+            Accept: 'application/json',
+          },
+        }
+      );
+      if (!response.ok) continue;
+      const results = await response.json();
+      const first = Array.isArray(results) ? results[0] : null;
+      if (!first?.lat || !first?.lon) continue;
+
+      const coords = {
+        lat: Number(first.lat),
+        lon: Number(first.lon),
+      };
+      if (Number.isFinite(coords.lat) && Number.isFinite(coords.lon)) {
+        geocodeCache.set(normalized, coords);
+        return coords;
+      }
+    } catch {
+      // Ignore lookup failures and fall back to existing coordinates.
+    }
+  }
+
+  return null;
+};
+
+const alignStopsToDayLocations = async (trip: GeneratedTrip) => {
+  const alignedStops = await Promise.all(
+    trip.stops.map(async stop => {
+      // ถ้ามี coordinates จริงอยู่แล้ว ไม่ต้อง geocode
+      if (stop.lat !== 0 || stop.lon !== 0) return stop;
+
+      const day = trip.days.find(item => item.day === stop.day);
+      const locationName = day?.city || day?.title || stop.name;
+      const coords = await geocodeProvinceOrCity(locationName);
+      if (!coords) return stop;
+
+      return {
+        ...stop,
+        name: locationName,
+        lat: coords.lat,
+        lon: coords.lon,
+        note: day?.title || stop.note,
+      };
+    })
+  );
+
+  return {
+    ...trip,
+    // กรองทิ้ง stops ที่ยังไม่มี coordinates จริง (lat=0, lon=0)
+    stops: alignedStops.filter(s => s.lat !== 0 || s.lon !== 0),
+  };
+};
 
 const callOpenRouter = async (chatHistory: ChatMessage[], systemPrompt?: string) => {
   if (!OPENROUTER_API_KEY) {
@@ -103,7 +243,7 @@ async function extractTextFromPDF(file: File): Promise<string> {
 }
 
 const FILTERS = [
-  { id: 'province', label: 'Province', icon: Map, color: BLUE },
+  { id: 'province', label: 'Province', icon: MapIcon, color: BLUE },
   { id: 'crowds', label: 'Crowds', icon: Users, color: GREEN },
   { id: 'authentic', label: 'Authentic', icon: Star, color: GOLD },
   { id: 'weather', label: 'Weather', icon: Cloud, color: BLUE },
@@ -203,8 +343,8 @@ const TripMap = ({ stops }: { stops: TripStop[] }) => {
       const marker = new longdo.Marker(
         { lon: stop.lon, lat: stop.lat },
         {
-          title: stop.city,
-          detail: `Day ${stop.day}${stop.note ? ': ' + stop.note : ''}`,
+          title: stop.name,
+          detail: `Day ${stop.day}${stop.time ? ' · ' + stop.time : ''}${stop.note ? ': ' + stop.note : ''}`,
           icon: {
             html: `<div style="
               background:${stop.color};color:white;border-radius:50%;
@@ -214,7 +354,7 @@ const TripMap = ({ stops }: { stops: TripStop[] }) => {
               font-family:Poppins,sans-serif;flex-direction:column;line-height:1.1;
             ">
               <span style="font-size:8px;opacity:0.85">D${stop.day}</span>
-              <span style="font-size:7px;max-width:28px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${stop.city.split(' ')[0]}</span>
+              <span style="font-size:7px;max-width:28px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${stop.name.split(' ')[0]}</span>
             </div>`,
             offset: { x: 17, y: 17 },
           },
@@ -232,7 +372,11 @@ const TripMap = ({ stops }: { stops: TripStop[] }) => {
     }, true);
 
     // Draw real road routes via OSRM, fallback to straight line
-    const sorted = [...stops].sort((a, b) => a.day - b.day);
+    const sorted = [...stops].sort((a, b) => {
+      const dayDiff = a.day - b.day;
+      if (dayDiff !== 0) return dayDiff;
+      return (a.time || '99:99').localeCompare(b.time || '99:99');
+    });
 
     const drawRoutes = async () => {
       for (let i = 1; i < sorted.length; i++) {
@@ -366,14 +510,8 @@ export default function PlannerPage() {
   const [attachedFile, setAttachedFile] = useState<{ name: string; size: string } | null>(null);
   const [pdfTexts, setPdfTexts] = useState<{ name: string; text: string }[]>([]);
   const [isLoading, setIsLoading] = useState(false);
-
-  const DEFAULT_STOPS: TripStop[] = [
-    { city: 'Bangkok',    day: 1, lat: 13.7563, lon: 100.5018, color: COLORS[0] },
-    { city: 'Ayutthaya',  day: 2, lat: 14.3532, lon: 100.5659, color: COLORS[1] },
-    { city: 'Chiang Mai', day: 3, lat: 18.7883, lon: 98.9853,  color: COLORS[2] },
-    { city: 'Chiang Rai', day: 4, lat: 19.9105, lon: 99.8406,  color: COLORS[3] },
-  ];
-  const [tripStops, setTripStops] = useState<TripStop[]>(DEFAULT_STOPS);
+  const [generatedTrip, setGeneratedTrip] = useState<GeneratedTrip>(() => loadGeneratedTrip() ?? defaultGeneratedTrip);
+  const [tripStops, setTripStops] = useState<TripStop[]>(() => (loadGeneratedTrip() ?? defaultGeneratedTrip).stops);
 
   const inputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -400,6 +538,27 @@ export default function PlannerPage() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const syncLoadedTripStops = async () => {
+      const alignedTrip = await alignStopsToDayLocations(generatedTrip);
+      if (cancelled) return;
+
+      const hasChanged = JSON.stringify(alignedTrip.stops) !== JSON.stringify(generatedTrip.stops);
+      if (!hasChanged) return;
+
+      saveGeneratedTrip(alignedTrip);
+      setGeneratedTrip(alignedTrip);
+      setTripStops(alignedTrip.stops);
+    };
+
+    syncLoadedTripStops();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Horizontal drag scroll for filter bar
   useEffect(() => {
@@ -430,9 +589,20 @@ export default function PlannerPage() {
     if (f.type === 'application/pdf') {
       try {
         const text = await extractTextFromPDF(f);
-        setPdfTexts(prev => [...prev, { name: f.name, text: text.slice(0, 3000) }]);
+        if (text.trim()) {
+          setPdfTexts(prev => [...prev, { name: f.name, text: text.slice(0, 3000) }]);
+        } else {
+          setMessages(prev => [...prev, {
+            role: 'ai',
+            text: 'I could not read selectable text from this PDF. If it is a scanned image PDF, please upload a text-based PDF or paste the itinerary details.',
+          }]);
+        }
       } catch (err) {
         console.error('PDF read error:', err);
+        setMessages(prev => [...prev, {
+          role: 'ai',
+          text: 'I could not read this PDF. Please try another file or paste the itinerary details.',
+        }]);
       }
     }
     e.target.value = '';
@@ -457,43 +627,55 @@ export default function PlannerPage() {
       .join('\n\n')
       .slice(0, 6000);
 
-    const systemPrompt = `You are a Thailand travel assistant.
-${pdfTexts.length > 0 ? `The user has shared PDF documents:\n${combinedContext}\n\n` : ''}
-Whenever you recommend ANY places, restaurants, attractions, or locations — ALWAYS respond in this EXACT format:
+    const systemPrompt = `You are a Thailand travel assistant that manages a LIVE trip map and itinerary. The user's current trip is:
 
-TRIP_JSON:{"stops":[{"city":"Place Name","day":1,"lat":13.7563,"lon":100.5018,"note":"Short description"}]}
-SUMMARY:Your friendly summary text here.
+CURRENT TRIP:
+${JSON.stringify(generatedTrip, null, 2)}
+
+${pdfTexts.length > 0 ? `The user has shared PDF documents:\n${combinedContext}\n\n` : ''}
+You MUST ALWAYS respond with TRIP_JSON containing the FULL updated trip, even for small edits. The map and itinerary update automatically when you return TRIP_JSON.
+
+Respond in this exact two-section format:
+
+TRIP_JSON:{"title":"Trip Plan Title","stops":[{"name":"Place Name","day":1,"time":"09:00","lat":13.7563,"lon":100.5018,"note":"Short route/map note"}],"days":[{"day":1,"title":"Day Title","city":"City Name","activities":[{"time":"09:00","name":"Activity Name","type":"sight","cost":0,"lat":13.7563,"lon":100.5018,"note":"Optional note"}]}]}
+SUMMARY:ตารางรายวัน
+วันที่ 1: ...
 
 Rules:
-- ALWAYS include TRIP_JSON whenever you mention specific places, even for lunch spots or restaurants.
-- Use accurate real GPS coordinates for every place.
-- For multiple places recommended together, increment day numbers starting from 1 (e.g. day:1, day:2, day:3).
-- If places are in the same visit (e.g. 3 lunch options), use the same day number for all.
-- Always respond in the same language the user uses.`;
+- ALWAYS include TRIP_JSON in every response. No exceptions.
+- TRIP_JSON must be valid JSON. Do not wrap it in markdown.
+- Always include real GPS coordinates (lat/lon) for every stop and activity using known Thailand coordinates.
+- If the user edits the trip, update the FULL trip JSON based on CURRENT TRIP above.
+- If no PDF, use your knowledge of Thailand to build or update the trip.
+- If PDF is provided, base trip on PDF content and fill coordinates from your knowledge.
+- Sort activities by time. Day numbers start at 1.
+- Activity type must be one of: sight, food, transport, hotel.
+- SUMMARY must be in Thai daily-table style starting with "ตารางรายวัน".
+- Keep SUMMARY concise: day heading, then one activity per line with HH:mm time.`;
 
-    const apiHistory: ChatMessage[] = [
-      ...messages,
-      { role: 'user', text: input },
-    ];
+    const apiHistory: ChatMessage[] = pdfTexts.length > 0
+      ? [{ role: 'user', text: input || 'Extract the trip plan from the uploaded PDF only.' }]
+      : [
+          ...messages,
+          { role: 'user', text: input },
+        ];
 
     try {
       const aiResponseText = await callOpenRouter(apiHistory, systemPrompt);
 
-      // Parse TRIP_JSON if present — greedy match to handle nested JSON
-      const jsonMatch = aiResponseText.match(/TRIP_JSON:(\{[\s\S]*\})\s*\nSUMMARY:/);
-      const summaryMatch = aiResponseText.match(/SUMMARY:([\s\S]*)/);
+      const extracted = extractTripPayloadFromResponse(aiResponseText);
 
-      if (jsonMatch && summaryMatch) {
+      if (extracted) {
         try {
-          const parsed = JSON.parse(jsonMatch[1]);
-          const newStops: TripStop[] = parsed.stops.map((s: any, i: number) => ({
-            ...s,
-            color: COLORS[i % COLORS.length],
-          }));
-          setTripStops(newStops);
+          const parsed = JSON.parse(extracted.jsonText);
+          const summary = extracted.summary || (typeof parsed?.summary === 'string' ? parsed.summary.trim() : '');
+          const trip = await alignStopsToDayLocations(normalizeGeneratedTrip(parsed, summary));
+          saveGeneratedTrip(trip);
+          setGeneratedTrip(trip);
+          setTripStops(trip.stops);
           setMessages(prev => [...prev, {
             role: 'ai',
-            text: '🗺️ ' + summaryMatch[1].trim(),
+            text: summary || aiResponseText,
           }]);
         } catch {
           // JSON parse failed — show raw response
@@ -638,6 +820,15 @@ Rules:
                     <span style={{ fontSize: 11, color: GREEN }}>Online</span>
                   </div>
                 </div>
+                <motion.button
+                  whileTap={{ scale: 0.94 }}
+                  onClick={() => exportTripToPdf(generatedTrip)}
+                  className="ml-2 flex items-center gap-1.5 px-3 py-1.5 rounded-full"
+                  style={{ background: BG, boxShadow: neuExSm, color: BLUE, border: `1px solid ${BLUE}44`, cursor: 'pointer', fontSize: 11, fontWeight: 700, fontFamily: 'Poppins, sans-serif' }}
+                >
+                  <Download size={12} />
+                  Export Trip
+                </motion.button>
               </div>
               <button onClick={() => setShowAI(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex' }}>
                 <X size={18} color={TEXT_MID} />

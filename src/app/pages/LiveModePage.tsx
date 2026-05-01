@@ -7,8 +7,6 @@ import {
 } from 'lucide-react';
 import { BG, BLUE, GREEN, GOLD, TEXT_DARK, TEXT_MID, TEXT_LIGHT, neuEx, neuIn, neuExSm, neuGoldGlow, neuBlueGlow } from '../neu';
 
-const MAP_IMG = 'https://images.unsplash.com/photo-1755259077240-b670b393bc6a?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxUaGFpbGFuZCUyMGJlYWNoJTIwdHJvcGljYWwlMjBpc2xhbmQlMjB0dXJxdW9pc2UlMjB3YXRlcnxlbnwxfHx8fDE3Nzc2MTg1MjB8MA&ixlib=rb-4.1.0&q=80&w=1080&utm_source=figma&utm_medium=referral';
-
 const STOPS = [
   { name: 'Grand Palace', done: true },
   { name: 'Wat Pho', done: true },
@@ -45,9 +43,41 @@ export default function LiveModePage() {
   return (
     <div className="relative flex flex-col h-full overflow-hidden" style={{ fontFamily: 'Poppins, sans-serif' }}>
       {/* Map Background */}
-      <div className="absolute inset-0">
-        <img src={MAP_IMG} alt="Live map" className="w-full h-full object-cover" />
-        <div className="absolute inset-0" style={{ background: 'rgba(15,25,50,0.45)' }} />
+      <div
+        className="absolute inset-0"
+        style={{
+          background: `
+            radial-gradient(circle at 20% 20%, rgba(39, 174, 96, 0.28), transparent 22%),
+            radial-gradient(circle at 78% 18%, rgba(27, 115, 198, 0.32), transparent 24%),
+            radial-gradient(circle at 72% 72%, rgba(240, 165, 0, 0.20), transparent 20%),
+            linear-gradient(180deg, #12324d 0%, #184c6b 42%, #0e2d43 100%)
+          `,
+        }}
+      >
+        <div className="absolute inset-0 opacity-35" style={{
+          backgroundImage: `
+            linear-gradient(rgba(255,255,255,0.06) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(255,255,255,0.06) 1px, transparent 1px)
+          `,
+          backgroundSize: '32px 32px',
+        }} />
+        <div className="absolute inset-0" style={{ background: 'rgba(15,25,50,0.36)' }} />
+
+        <div className="absolute inset-x-8 top-30 bottom-28 rounded-[28px] border border-white/15" style={{ boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.06)' }}>
+          <div className="absolute left-[18%] top-[20%] h-3 w-3 rounded-full bg-white/85" />
+          <div className="absolute left-[36%] top-[38%] h-3 w-3 rounded-full bg-white/85" />
+          <div className="absolute left-[58%] top-[52%] h-3 w-3 rounded-full bg-white/85" />
+          <div className="absolute left-[74%] top-[72%] h-3 w-3 rounded-full bg-white/85" />
+          <svg className="absolute inset-0 h-full w-full" viewBox="0 0 100 100" preserveAspectRatio="none">
+            <path
+              d="M18 20 C 28 26, 34 34, 36 39 S 51 48, 58 53 S 69 63, 74 72"
+              fill="none"
+              stroke="rgba(255,255,255,0.28)"
+              strokeWidth="1.8"
+              strokeDasharray="2.4 2.8"
+            />
+          </svg>
+        </div>
       </div>
 
       {/* Top Banner - Navigation Info */}

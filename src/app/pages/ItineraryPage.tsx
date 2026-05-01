@@ -6,13 +6,14 @@ import {
   Utensils, Landmark, Bed, Car, Bot, Check, Map
 } from 'lucide-react';
 import { BG, BLUE, GREEN, GOLD, TEXT_DARK, TEXT_MID, TEXT_LIGHT, neuEx, neuIn, neuExSm, neuGoldGlow } from '../neu';
+import { loadGeneratedTrip, type TripActivityType, type TripDay } from '../tripData';
 
 interface Activity {
   id: string;
   name: string;
   time: string;
   cost: number;
-  type: 'sight' | 'food' | 'transport' | 'hotel';
+  type: TripActivityType;
   checked: boolean;
   note?: string;
 }
@@ -76,9 +77,31 @@ const initialDays: DayData[] = [
 
 const activityIcons = { sight: Landmark, food: Utensils, transport: Car, hotel: Bed };
 
+const toTimelineDays = (tripDays: TripDay[]): DayData[] => tripDays.map((day, dayIndex) => ({
+  day: day.day,
+  city: day.title || day.city,
+  color: day.color,
+  emoji: dayIndex === 0 ? '📍' : '🧭',
+  expanded: dayIndex === 0,
+  activities: day.activities.map((activity, activityIndex) => ({
+    id: `generated-${day.day}-${activityIndex}`,
+    name: activity.name,
+    time: activity.time,
+    cost: activity.cost,
+    type: activity.type,
+    checked: false,
+    note: activity.note,
+  })),
+}));
+
+const loadInitialDays = () => {
+  const generatedTrip = loadGeneratedTrip();
+  return generatedTrip ? toTimelineDays(generatedTrip.days) : initialDays;
+};
+
 export default function ItineraryPage() {
   const navigate = useNavigate();
-  const [days, setDays] = useState<DayData[]>(initialDays);
+  const [days, setDays] = useState<DayData[]>(loadInitialDays);
 
   const toggleDay = (dayNum: number) => {
     setDays(d => d.map(day => day.day === dayNum ? { ...day, expanded: !day.expanded } : day));
@@ -152,7 +175,7 @@ export default function ItineraryPage() {
             <div className="h-full flex">
               {days.map(d => (
                 <div key={d.day} className="h-full" style={{
-                  width: `${(dayBudget(d) / totalBudget) * 100}%`,
+                  width: `${totalBudget > 0 ? (dayBudget(d) / totalBudget) * 100 : 100 / Math.max(days.length, 1)}%`,
                   background: d.color,
                   transition: 'width 0.5s',
                 }} />
